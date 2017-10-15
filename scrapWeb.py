@@ -5,21 +5,54 @@ from nltk.corpus import stopwords
 from textblob import TextBlob
 
 import pandas as pd
-#import matplotlib.pyplot as plt
+import fnmatch
 
+###############################################################################
+
+def getIndeedUrls(position, location = ''):
+    print("Getting job listings.....")
+    position = position.replace(" ", '+')
+    #print(position)
+    location = location.replace(" ",'+')
+    #print(location)
+    url = 'https://au.indeed.com/jobs?q=' + position + '&l=' + location
+    print(url)
+    
+    r = requests.get(url)
+    html_code = r.text
+    
+    soup = BeautifulSoup(html_code, "lxml")
+    links = soup.find_all('a')
+    
+    ret_lst = []
+    
+    for tag in links:
+        link = tag.get('href',None)
+        pattern = "/rc/*"
+        
+        if link is not None:
+            if fnmatch.fnmatch(link, pattern):
+               ret_lst.append("https://www.indeed.com" + link)
+    
+    if len(ret_lst) ==0:
+        raise ValueError("There are no jobs for the combination")
+    
+    return ret_lst
+
+################################################################################
 
 def getUrlText(url_lst):
     """
     url_lst - List of URLs to be processed
     Will return list of strings(text from the URLs)
     """
-    
+    print("Retriving text")
     #Initialising array for return
     ret_text = []
     
     for url in url_lst:
         
-        print(url)
+        print(len(url_lst)-len(ret_text))
         
         #Get text from Url
         r = requests.get(url)
@@ -37,13 +70,17 @@ def getUrlText(url_lst):
     
     return ret_text
 
+###############################################################################
 
-def getFrequentWords(text_lst):
+def getFrequentWords(text_lst, exclude = [], skills =[], quart = 0.8):
     """
     text_lst - List of strings to be processed
+    exclude - List of words to be pervented
     quart - Quartile for words
     Will return list of strings(text from the URLs)
     """
+    print("Obtaining list of frequent words")
+    
     #Intialsing list for dataframes
     df_con = []
     
@@ -52,7 +89,8 @@ def getFrequentWords(text_lst):
         text = TextBlob(t)
         text = text.words.singularize()
         text = [t.lower() for t in text if t.isalnum()]
-         
+        text = [t for t in text if t not in exclude]
+        
         stop_words = set(stopwords.words("english"))
         wordsFiltered = {}
         for w in text:
@@ -68,7 +106,7 @@ def getFrequentWords(text_lst):
     
     assert len(df_con) == len(text_lst)
         
-    #Combine all the URLs' frequently used words
+    #Combine all the URLs' frequently used words above the gven quantile
     df_unfinal = pd.concat(df_con, axis =0)
     assert pd.notnull(df_unfinal).all().all()
     
@@ -78,16 +116,23 @@ def getFrequentWords(text_lst):
         df_unfinal = df_unfinal.drop_duplicates(subset = 'word')
     
     assert df_unfinal.word.value_counts()[0] == 1
-
-    quant= df_unfinal.quantile(0.8)
-    df_final = df_unfinal[df_unfinal['counts']>quant.loc['counts']]
     
-    assert df_final.word.dtype == object
-    assert df_final.counts.dtype == 'int64'
+    ret_skills = []
     
-    return df_final
+    for word in skills:
+        if word in df_unfinal.loc[:,'word'].values:
+            ret_skills.append(word)
+    
+    quant= df_unfinal.quantile(quart)
+    ret_df = df_unfinal[df_unfinal['counts']>quant.loc['counts']]
+    
+    assert ret_df.word.dtype == object
+    assert ret_df.counts.dtype == 'int64'
+    
+    return ret_df, ret_skills
 
+###############################################################################
 
-url_lst = ['https://stackoverflow.com/questions/684171/how-to-re-import-an-updated-package-while-in-python-interpreter','https://stackoverflow.com/questions/12477823/calling-a-function-in-a-separate-file-in-python']
+url_lst = getIndeedUrls("data scientist", location = '')
 text_lst = getUrlText(url_lst)
-df = getFrequentWords(text_lst)
+df, df_skill = getFrequentWords(text_lst, skills = ['c++', 'Go', ' nlp', 'sql', 'python'])
